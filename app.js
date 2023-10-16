@@ -4,10 +4,29 @@ const bodyParser = require('body-parser');
 const fs = require('fs');
 const crypto = require('crypto-js');
 const swaggerUi = require('swagger-ui-express');
-const swaggerSpec = require('./swagger');
-
+const { v4: uuidv4 } = require('uuid');
+const cors = require('cors');
+const swaggerJSDoc = require('swagger-jsdoc');
 const app = express();
 const port = 3000; // You can change the port as needed
+
+// Enable CORS for all routes
+app.use(cors());
+
+// Define options for swagger-jsdoc
+const options = {
+  definition: {
+    openapi: '3.0.0', // Specify the version of OpenAPI you're using
+    info: {
+      title: 'Contact Management API',
+      version: '1.0.0',
+      description: 'API for managing contacts with encryption',
+    },
+  },
+  apis: ['./app.js'], // Provide the path to the file where your Swagger definitions are
+};
+
+const swaggerSpec = swaggerJSDoc(options);
 
 // Middleware to parse JSON in the request body
 app.use(bodyParser.json());
@@ -23,6 +42,7 @@ const dataFile = 'contacts-data.json';
  *     description: Create a new contact with first name, last name, and phone number.
  *     tags: [Contacts]
  *     requestBody:
+ *       required: true
  *       content:
  *         application/json:
  *           schema:
@@ -44,16 +64,36 @@ const dataFile = 'contacts-data.json';
  *       '400':
  *         description: Bad request. Invalid input data.
  */
+
+// Function to validate contact data
+function validateContactData(data) {
+  if (!data.firstName || typeof data.firstName !== 'string') {
+    return false;
+  }
+  if (!data.lastName || typeof data.lastName !== 'string') {
+    return false;
+  }
+  if (!data.phoneNumber || typeof data.phoneNumber !== 'string') {
+    return false;
+  }
+  return true;
+}
+
 app.post('/api/contacts', (req, res) => {
   const { firstName, lastName, phoneNumber } = req.body;
 
-  // Generate a unique ID for the new contact
-  const contactId = crypto.SHA256(`${firstName}${lastName}${phoneNumber}`).toString();
+  // Validate the input data
+  if (!validateContactData(req.body)) {
+    return res.status(400).json({ message: 'Bad request. Invalid input data' });
+  }
+
+  // Generate a unique UUID for the new contact
+  const contactId = uuidv4(); // Generates a random UUID
 
   // Encrypt each field separately
-  const encryptedFirstName = crypto.AES.encrypt(firstName, 'your-secret-key').toString();
-  const encryptedLastName = crypto.AES.encrypt(lastName, 'your-secret-key').toString();
-  const encryptedPhoneNumber = crypto.AES.encrypt(phoneNumber, 'your-secret-key').toString();
+  const encryptedFirstName = crypto.AES.encrypt(firstName, '12345').toString();
+  const encryptedLastName = crypto.AES.encrypt(lastName, '12345').toString();
+  const encryptedPhoneNumber = crypto.AES.encrypt(phoneNumber, '12345').toString();
 
   // Create a contact object
   const newContact = {
@@ -66,9 +106,14 @@ app.post('/api/contacts', (req, res) => {
   // Read existing data from the file
   let existingData = [];
   try {
-    existingData = JSON.parse(fs.readFileSync(dataFile, 'utf8'));
+    const data = fs.readFileSync(dataFile, 'utf8');
+    if (data) {
+      existingData = JSON.parse(data);
+    }
   } catch (error) {
-    // If the file doesn't exist or is empty, existingData will be an empty array
+    console.error('Error reading or processing data:', error);
+    res.status(500).json({ message: 'Internal server error' });
+    return;
   }
 
   // Add the new contact to the existing data
@@ -79,7 +124,6 @@ app.post('/api/contacts', (req, res) => {
 
   res.json({ message: 'Contact created successfully' });
 });
-
 
 /**
  * @swagger
@@ -92,30 +136,36 @@ app.post('/api/contacts', (req, res) => {
  *       '200':
  *         description: List of contacts.
  */
+
+// Function to decrypt and parse contact data
 app.get('/api/contacts', (req, res) => {
-  // Read data from the file
-  const data = fs.readFileSync(dataFile, 'utf8').trim(); // Remove leading/trailing whitespace
-
-  if (!data) {
-    return res.status(200).json([]); // Return an empty array if the file is empty
-  }
-
-  const encryptedContacts = data.split('\n');
-
-  const contacts = encryptedContacts.map((encryptedData) => {
-    try {
-      const decryptedData = crypto.AES.decrypt(encryptedData, 'your-secret-key').toString(crypto.enc.Utf8);
-      return JSON.parse(decryptedData);
-    } catch (err) {
-      console.error('Error parsing or decrypting contact:', err);
-      return null; // Skip invalid contacts
+  try {
+    const data = fs.readFileSync(dataFile, 'utf8').trim();
+    if (!data) {
+      return res.status(200).json([]); // Return an empty array if the file is empty
     }
-  });
 
-  // Filter out any invalid contacts
-  const validContacts = contacts.filter((contact) => contact !== null);
+    const encryptedContacts = JSON.parse(data);
+    const contacts = encryptedContacts.map((contact) => {
+      // Decrypt firstName, lastName, and phoneNumber while leaving id as is
+      const decryptedContact = {
+        id: contact.id,
+        firstName: crypto.AES.decrypt(contact.firstName, '12345').toString(crypto.enc.Utf8),
+        lastName: crypto.AES.decrypt(contact.lastName, '12345').toString(crypto.enc.Utf8),
+        phoneNumber: crypto.AES.decrypt(contact.phoneNumber, '12345').toString(crypto.enc.Utf8),
+      };
 
-  res.json(validContacts);
+      return decryptedContact;
+    });
+
+    // Filter out any invalid contacts
+    const validContacts = contacts.filter((contact) => contact.firstName && contact.lastName && contact.phoneNumber);
+
+    res.json(validContacts);
+  } catch (error) {
+    console.error('Error reading or processing data:', error);
+    res.status(500).json({ message: 'Internal server error' });
+  }
 });
 
 /**
@@ -161,16 +211,17 @@ app.put('/api/contacts/:id', (req, res) => {
   const { firstName, lastName, phoneNumber } = req.body;
 
   // Encrypt each field separately
-  const encryptedFirstName = crypto.AES.encrypt(firstName, 'your-secret-key').toString();
-  const encryptedLastName = crypto.AES.encrypt(lastName, 'your-secret-key').toString();
-  const encryptedPhoneNumber = crypto.AES.encrypt(phoneNumber, 'your-secret-key').toString();
+  const encryptedFirstName = crypto.AES.encrypt(firstName, '12345').toString();
+  const encryptedLastName = crypto.AES.encrypt(lastName, '12345').toString();
+  const encryptedPhoneNumber = crypto.AES.encrypt(phoneNumber, '12345').toString();
 
   // Read existing data from the file
   let existingData = [];
   try {
     existingData = JSON.parse(fs.readFileSync(dataFile, 'utf8'));
   } catch (error) {
-    // If the file doesn't exist or is empty, existingData will be an empty array
+    console.error('Error reading data:', error);
+    return res.status(500).json({ message: 'Internal server error' });
   }
 
   // Find the index of the contact with the provided ID
@@ -186,7 +237,8 @@ app.put('/api/contacts/:id', (req, res) => {
     // Write the updated data back to the file
     fs.writeFileSync(dataFile, JSON.stringify(existingData), 'utf8');
 
-    res.status(200).json({ message: 'Contact updated successfully' });
+    // Return the updated contact
+    res.status(200).json({ message: 'Contact updated successfully', updatedContact: existingData[contactIndex] });
   } else {
     // If the contact with the provided ID is not found
     res.status(404).json({ message: 'Contact not found' });
@@ -241,10 +293,11 @@ app.put('/api/contacts/:id', (req, res) => {
     }
   });  
 
-// Serve Swagger documentation
-app.use('/api-docs', swaggerUi.serve, swaggerUi.setup(swaggerSpec));
-
 // Start the Express server
 app.listen(port, () => {
   console.log(`Server is running on port ${port}`);
+
+// Serve Swagger documentation
+app.use('/api-docs', swaggerUi.serve, swaggerUi.setup(swaggerSpec));
+
 });
