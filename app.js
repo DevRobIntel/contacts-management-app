@@ -210,18 +210,16 @@ app.put('/api/contacts/:id', (req, res) => {
   const contactId = req.params.id;
   const { firstName, lastName, phoneNumber } = req.body;
 
-  // Encrypt each field separately
-  const encryptedFirstName = crypto.AES.encrypt(firstName, '12345').toString();
-  const encryptedLastName = crypto.AES.encrypt(lastName, '12345').toString();
-  const encryptedPhoneNumber = crypto.AES.encrypt(phoneNumber, '12345').toString();
-
   // Read existing data from the file
   let existingData = [];
   try {
-    existingData = JSON.parse(fs.readFileSync(dataFile, 'utf8'));
+    const data = fs.readFileSync(dataFile, 'utf8');
+    if (data) {
+      existingData = JSON.parse(data);
+    }
   } catch (error) {
     console.error('Error reading data:', error);
-    return res.status(500).json({ message: 'Internal server error' });
+    return res.status(500).json({ message: 'Internal server error', error: error.message });
   }
 
   // Find the index of the contact with the provided ID
@@ -229,16 +227,32 @@ app.put('/api/contacts/:id', (req, res) => {
 
   // If the contact with the provided ID is found
   if (contactIndex !== -1) {
-    // Update the contact's information
-    existingData[contactIndex].firstName = encryptedFirstName;
-    existingData[contactIndex].lastName = encryptedLastName;
-    existingData[contactIndex].phoneNumber = encryptedPhoneNumber;
+    // Decrypt the existing contact
+    const decryptedContact = existingData[contactIndex];
 
-    // Write the updated data back to the file
+    // Decrypt the existing data fields and update them with the new values
+    const decryptedFirstName = crypto.AES.decrypt(decryptedContact.firstName, '12345').toString(crypto.enc.Utf8);
+    const decryptedLastName = crypto.AES.decrypt(decryptedContact.lastName, '12345').toString(crypto.enc.Utf8);
+    const decryptedPhoneNumber = crypto.AES.decrypt(decryptedContact.phoneNumber, '12345').toString(crypto.enc.Utf8);
+
+    // Update the contact's information with the new values
+    decryptedContact.firstName = firstName;
+    decryptedContact.lastName = lastName;
+    decryptedContact.phoneNumber = phoneNumber;
+
+    // Encrypt the updated contact
+    decryptedContact.firstName = crypto.AES.encrypt(decryptedFirstName, '12345').toString();
+    decryptedContact.lastName = crypto.AES.encrypt(decryptedLastName, '12345').toString();
+    decryptedContact.phoneNumber = crypto.AES.encrypt(decryptedPhoneNumber, '12345').toString();
+
+    // Replace the existing data with the updated contact
+    existingData[contactIndex] = decryptedContact;
+
+    // Write the updated and encrypted data back to the file
     fs.writeFileSync(dataFile, JSON.stringify(existingData), 'utf8');
 
     // Return the updated contact
-    res.status(200).json({ message: 'Contact updated successfully', updatedContact: existingData[contactIndex] });
+    res.status(200).json({ message: 'Contact updated successfully', updatedContact: decryptedContact });
   } else {
     // If the contact with the provided ID is not found
     res.status(404).json({ message: 'Contact not found' });

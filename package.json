@@ -1,7 +1,7 @@
 {
   "name": "contacts-management-app",
   "version": "1.0.0",
-  "description": "Streamline your contacts with our secure contact management app",
+  "description": "API for managing contacts with encryption",
   "main": "index.js",
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1"
@@ -11,7 +11,7 @@
     "url": "git+https://github.com/DevRobIntel/contacts-management-app.git"
   },
   "author": "Robert Kibugi",
-  "license": "ISC",
+  "license": "MIT",
   "bugs": {
     "url": "https://github.com/DevRobIntel/contacts-management-app/issues"
   },
