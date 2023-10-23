@@ -9,7 +9,7 @@ To get started with this API, follow the steps below:
 1. Clone this repository to your local machine:
 
    ```sh
-   git clone https://github.com/devrobintel/contact-management-api.git
+   git clone https://github.com/devrobintel/contacts-management-app.git
 
 2. Install the required dependencies
    cd contact-management-api
